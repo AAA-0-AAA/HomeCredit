@@ -1,0 +1,172 @@
+# ライブラリの読み込み
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+import warnings
+warnings.filterwarnings('ignore')
+# Google Colaboratoryで作業する場合はこちらも実行してください。
+from google.colab import drive
+drive.mount('/content/drive')
+# %cd 以降にこのnotebookを置いているディレクトリを指定してください。
+%cd "/content/drive/MyDrive"
+# データの読み込み
+# INPUT_DIRにtrain.csvなどのデータを置いているディレクトリを指定してください。
+INPUT_DIR = "/content/drive/MyDrive/Colab Notebooks/input/"
+
+train = pd.read_csv(INPUT_DIR + "train.csv")
+test = pd.read_csv(INPUT_DIR + "test.csv")
+sample_sub = pd.read_csv(INPUT_DIR + "sample_submission.csv")
+# trainデータの確認
+print(f"train shape: {train.shape}")
+train.head(3)
+# testデータの確認
+print(f"test shape: {test.shape}")
+test.head(3)
+# 5種類の特徴量に絞る
+use_features = ["NAME_CONTRACT_TYPE", "AMT_INCOME_TOTAL", "EXT_SOURCE_2", "OWN_CAR_AGE", "ORGANIZATION_TYPE"]
+target = train["TARGET"].values
+
+train = train[use_features]
+train["TARGET"] = target
+test = test[use_features]
+# trainデータの確認
+print(f"train shape: {train.shape}")
+train.head(3)
+# testデータの確認
+print(f"test shape: {test.shape}")
+test.head(3)
+# trainの欠損値を確認
+train.isnull().sum()
+# testの欠損値を確認
+test.isnull().sum()
+# 目的変数（債務不履行かどうか）の分布
+sns.countplot(data=train, x="TARGET")
+plt.show()
+# NAME_CONTRACT_TYPEの分布
+sns.countplot(data=train, x="NAME_CONTRACT_TYPE")
+plt.show()
+# ORGANIZATION_TYPEの分布
+plt.figure(figsize=(30, 10))
+sns.countplot(data=train, x="ORGANIZATION_TYPE")
+plt.tick_params(axis="x", rotation=90)
+plt.show()
+# EXT_SOURCE_2の分布
+sns.displot(data=train, x="EXT_SOURCE_2")
+plt.show()
+# AMT_INCOME_TOTALの分布
+sns.displot(data=train, x="AMT_INCOME_TOTAL")
+plt.show()
+# AMT_INCOME_TOTALの分布（対数変換）
+sns.displot(data=train, x="AMT_INCOME_TOTAL", log_scale=10)
+plt.show()
+# AMT_INCOME_TOTALの値の種類を確認
+len(train["AMT_INCOME_TOTAL"].unique())
+# AMT_INCOME_TOTALの上位10個
+train["AMT_INCOME_TOTAL"].value_counts().head(10)
+# OWN_CAR_AGEの分布
+sns.displot(data=train, x="OWN_CAR_AGE")
+plt.show()
+# EXT_SOURCE_2の欠損値を平均値で補完
+train["EXT_SOURCE_2"].fillna(train["EXT_SOURCE_2"].mean(), inplace=True)
+test["EXT_SOURCE_2"].fillna(train["EXT_SOURCE_2"].mean(), inplace=True)
+
+train.isnull().sum()
+# NAME_CONTRACT_TYPEの数値化（Label Encoding）
+train["NAME_CONTRACT_TYPE"].replace({'Cash loans': 0, 'Revolving loans': 1}, inplace=True)
+test["NAME_CONTRACT_TYPE"].replace({'Cash loans': 0, 'Revolving loans': 1}, inplace=True)
+
+train.head(5)
+# ORGANIZATION_TYPEの数値化（Count Encoding）
+organization_ce = train["ORGANIZATION_TYPE"].value_counts()
+train["ORGANIZATION_TYPE"] = train["ORGANIZATION_TYPE"].map(organization_ce)
+test["ORGANIZATION_TYPE"] = test["ORGANIZATION_TYPE"].map(organization_ce)
+
+train.head(5)
+# OWN_CAR_AGEの60以上の値（外れ値）を欠損値扱いする
+train.loc[train["OWN_CAR_AGE"] >= 60, "OWN_CAR_AGE"] = np.nan
+test.loc[test["OWN_CAR_AGE"] >= 60, "OWN_CAR_AGE"] = np.nan
+# OWN_CAR_AGEをグループ分け
+train["OWN_CAR_AGE"] = train["OWN_CAR_AGE"] // 10
+test["OWN_CAR_AGE"] = test["OWN_CAR_AGE"] // 10
+
+train["OWN_CAR_AGE"].unique()
+# OWN_CAR_AGEをOne Hot Encoding
+train_car_age_ohe = pd.get_dummies(train["OWN_CAR_AGE"]).add_prefix("OWN_CAR_AGE_")
+test_car_age_ohe = pd.get_dummies(test["OWN_CAR_AGE"]).add_prefix("OWN_CAR_AGE_")
+
+train = pd.concat([train, train_car_age_ohe], axis=1)
+test = pd.concat([test, test_car_age_ohe], axis=1)
+
+train.drop('OWN_CAR_AGE', axis=1, inplace=True)
+test.drop('OWN_CAR_AGE', axis=1, inplace=True)
+
+train.head(5)
+# ライブラリの読み込み
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import roc_auc_score
+# 目的変数と説明変数に分割
+X = train.drop("TARGET", axis=1).values
+y = train["TARGET"].values
+X_test = test.values
+# 標準化
+sc = StandardScaler()
+sc.fit(X)
+X_std = sc.transform(X)
+X_test_std = sc.transform(X_test)
+# 訓練データと評価データに分割
+X_train, X_valid, y_train, y_valid = train_test_split(X_std, y, test_size=0.3, stratify=y, random_state=0)
+# LogisticRegression
+from sklearn.linear_model import LogisticRegression
+
+lr = LogisticRegression(random_state=0)
+lr.fit(X_train, y_train)
+
+lr_train_pred = lr.predict_proba(X_train)[:, 1]
+lr_valid_pred = lr.predict_proba(X_valid)[:, 1]
+print(f"Train Score: {roc_auc_score(y_train, lr_train_pred)}")
+print(f"Valid Score: {roc_auc_score(y_valid, lr_valid_pred)}")
+# MLPClassifier
+from sklearn.neural_network import MLPClassifier
+
+mlp = MLPClassifier(random_state=0)
+mlp.fit(X_train, y_train)
+
+mlp_train_pred = mlp.predict_proba(X_train)[:, 1]
+mlp_valid_pred = mlp.predict_proba(X_valid)[:, 1]
+print(f"Train Score: {roc_auc_score(y_train, mlp_train_pred)}")
+print(f"Valid Score: {roc_auc_score(y_valid, mlp_valid_pred)}")
+# XGBClassifier
+from xgboost import XGBClassifier
+
+xgb = XGBClassifier(random_state=0)
+xgb.fit(X_train, y_train)
+
+xgb_train_pred = xgb.predict_proba(X_train)[:, 1]
+xgb_valid_pred = xgb.predict_proba(X_valid)[:, 1]
+print(f"Train Score: {roc_auc_score(y_train, xgb_train_pred)}")
+print(f"Valid Score: {roc_auc_score(y_valid, xgb_valid_pred)}")
+# LGBMClassifier
+from lightgbm import LGBMClassifier
+
+lgb = LGBMClassifier(random_state=0)
+lgb.fit(X_train, y_train)
+
+lgb_train_pred = lgb.predict_proba(X_train)[:, 1]
+lgb_valid_pred = lgb.predict_proba(X_valid)[:, 1]
+print(f"Train Score: {roc_auc_score(y_train, lgb_train_pred)}")
+print(f"Valid Score: {roc_auc_score(y_valid, lgb_valid_pred)}")
+train_pred = (lr_train_pred + mlp_train_pred + lgb_train_pred + xgb_train_pred)/4
+valid_pred = (lr_valid_pred + mlp_valid_pred + lgb_valid_pred + xgb_valid_pred)/4
+
+print(f"Train Score: {roc_auc_score(y_train, train_pred)}")
+print(f"Valid Score: {roc_auc_score(y_valid, valid_pred)}")
+# テストデータに対する予測値の作成
+pred = xgb.predict_proba(X_test)[:, 1]
+# 予測結果を提出用のフォーマットに格納
+sample_sub['TARGET'] = pred
+sample_sub
+# 提出用のcsvファイルを作成
+sample_sub.to_csv('submission.csv',index=False)
